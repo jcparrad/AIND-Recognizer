@@ -68,6 +68,18 @@ class SelectorBIC(ModelSelector):
     Bayesian information criteria: BIC = -2 * logL + p * logN
     """
 
+    def bic_score(self, number_components):
+        # Bayesian information criteria: BIC = −2 log L + p log N
+        # L is the likelihood of the fitted mode
+        # p is the number of parameters
+        # N is the number of data points.
+        model_bic = self.base_model(number_components)
+        N = len(self.sequences)
+        p = (number_components**2 + 2*number_components*model_bic.n_features - 1)
+        logL = model_bic.score(self.X, self.lengths)
+        BIC = -2*logL + p*math.log(N)
+        return BIC, model_bic
+
     def select(self):
         """ select the best model for self.this_word based on
         BIC score for n between self.min_n_components and self.max_n_components
@@ -75,9 +87,17 @@ class SelectorBIC(ModelSelector):
         :return: GaussianHMM object
         """
         warnings.filterwarnings("ignore", category=DeprecationWarning)
-
-        # TODO implement model selection based on BIC scores
-        raise NotImplementedError
+        best_bic = float("inf")
+        bic_model = None
+        for number_components in range(self.min_n_components, self.max_n_components + 1):
+            try:
+                bic, model_bic = self.bic_score(number_components)
+                if bic < best_bic:
+                    best_bic = bic
+                    bic_model = model_bic
+            except:
+                pass
+        return bic_model
 
 
 class SelectorDIC(ModelSelector):
@@ -90,11 +110,32 @@ class SelectorDIC(ModelSelector):
     DIC = log(P(X(i)) - 1/(M-1)SUM(log(P(X(all but i))
     '''
 
-    def select(self):
-        warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-        # TODO implement model selection based on DIC scores
-        raise NotImplementedError
+    def dic_score(self, number_components):
+        # DIC = log(P(X(i)) - 1/(M - 1) * sum(log(P(X(all but i))
+        model_dic = self.base_model(number_components)
+        logl = model_dic.score(self.X, self.lengths)
+        other_words_likelihood = []
+        for this_word, (X, lengths) in self.hwords.items():
+            if this_word != self.this_word:
+                other_words_likelihood.append(model_dic.score(X, lengths))
+        dic = logl -  np.mean(other_words_likelihood)
+        return dic, model_dic
+
+    def select(self):
+
+        warnings.filterwarnings("ignore", category=DeprecationWarning)
+        best_dic = float("-inf")
+        dic_model = None
+        for number_components in range(self.min_n_components, self.max_n_components + 1):
+            try:
+                dic, model_dic = self.dic_score(number_components)
+                if dic > best_dic:
+                    best_dic = dic
+                    dic_model = model_dic
+            except:
+                pass
+        return dic_model
 
 
 class SelectorCV(ModelSelector):
@@ -102,8 +143,31 @@ class SelectorCV(ModelSelector):
 
     '''
 
+
+    def cv_score(self, number_components):
+        model_cv = self.base_model(number_components)
+        split_method = KFold()
+        scores_fold = []
+
+        for _, test_idx in split_method.split(self.sequences):
+            test_X, test_length = combine_sequences(test_idx, self.sequences)
+            scores_fold.append(model_cv.score(test_X, test_length))
+
+        cv = np.mean(scores_fold)
+        return cv, model_cv
+
     def select(self):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
+        try:
+            best_cv = float("inf")
+            cv_model = None
+            for number_components in range(self.min_n_components, self.max_n_components + 1):
 
-        # TODO implement model selection using CV
-        raise NotImplementedError
+                    cv, model_cv = self.cv_score(number_components)
+                    if cv < best_cv:
+                        best_cv = cv
+                        cv_model = model_cv
+
+            return cv_model
+        except:
+            return self.base_model(self.n_constant)
